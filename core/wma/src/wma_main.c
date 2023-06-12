@@ -340,7 +340,7 @@ static void wma_set_feature_set_info(tp_wma_handle wma_handle,
 	struct wlan_scan_features scan_feature_set;
 	struct wlan_twt_features twt_feature_set;
 	struct wlan_mlme_features mlme_feature_set;
-	struct wlan_tdls_features tdls_feature_set = {0};
+	struct wlan_tdls_features tdls_feature_set;
 
 	psoc = wma_handle->psoc;
 	if (!psoc) {
@@ -437,9 +437,9 @@ static void wma_set_feature_set_info(tp_wma_handle wma_handle,
 	feature_set->supported_dot11mode = feature_set->wifi_standard;
 	feature_set->sap_wpa3_support = true;
 	feature_set->assurance_disconnect_reason_api = true;
-	feature_set->frame_pcap_log_mgmt = false;
-	feature_set->frame_pcap_log_ctrl = false;
-	feature_set->frame_pcap_log_data = false;
+	feature_set->frame_pcap_log_mgmt = true;
+	feature_set->frame_pcap_log_ctrl = true;
+	feature_set->frame_pcap_log_data = true;
 
 	/*
 	 * This information is hardcoded based on hdd_sta_akm_suites,
@@ -479,7 +479,7 @@ static void wma_set_feature_set_info(tp_wma_handle wma_handle,
 	feature_set->peer_bigdata_getbssinfo_support = true;
 	feature_set->peer_bigdata_assocreject_info_support = true;
 	feature_set->peer_getstainfo_support = true;
-	feature_set->feature_set_version = 2;
+	feature_set->feature_set_version = 1;
 }
 
 /**
@@ -6178,11 +6178,6 @@ static void wma_set_mlme_caps(struct wlan_objmgr_psoc *psoc)
 	if (tgt_cap)
 		akm_bitmap |= (1 << AKM_SUITEB);
 
-	tgt_cap = wmi_service_enabled(wma->wmi_handle,
-				      wmi_service_wpa3_sha384_roam_support);
-	if (tgt_cap)
-		akm_bitmap |= (1 << AKM_SAE_EXT);
-
 	status = mlme_set_tgt_wpa3_roam_cap(psoc, akm_bitmap);
 	if (QDF_IS_STATUS_ERROR(status))
 		wma_err("Failed to set sae roam support");
@@ -8781,8 +8776,8 @@ static QDF_STATUS wma_mc_process_msg(struct scheduler_msg *msg)
 		goto end;
 	}
 
-	wma_nofl_debug("Handle msg %s(0x%x)",
-		       mac_trace_get_wma_msg_string(msg->type), msg->type);
+	wma_debug("msg->type = %x %s", msg->type,
+		 mac_trace_get_wma_msg_string(msg->type));
 
 	wma_handle = cds_get_context(QDF_MODULE_ID_WMA);
 	if (!wma_handle) {
@@ -9408,12 +9403,6 @@ static QDF_STATUS wma_mc_process_msg(struct scheduler_msg *msg)
 		break;
 	case WMA_TWT_NUDGE_DIALOG_REQUEST:
 		wma_twt_process_nudge_dialog(wma_handle, msg->bodyptr);
-		qdf_mem_free(msg->bodyptr);
-		break;
-	case WMA_UPDATE_EDCA_PIFS_PARAM_IND:
-		wma_update_edca_pifs_param(
-				wma_handle,
-				(struct edca_pifs_vparam *)msg->bodyptr);
 		qdf_mem_free(msg->bodyptr);
 		break;
 	default:

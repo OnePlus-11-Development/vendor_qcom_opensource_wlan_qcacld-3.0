@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -61,9 +61,7 @@ QDF_STATUS cm_fw_roam_sync_req(struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
 		return QDF_STATUS_E_NULL_VALUE;
 	}
 
-	if (mlo_is_mld_disconnecting_connecting(vdev) ||
-	    cm_is_vdev_connecting(vdev) ||
-	    cm_is_vdev_disconnecting(vdev)) {
+	if (cm_is_vdev_connecting(vdev) || cm_is_vdev_disconnecting(vdev)) {
 		mlme_err("vdev %d Roam sync not handled in connecting/disconnecting state",
 			 vdev_id);
 		wlan_objmgr_vdev_release_ref(vdev, WLAN_MLME_SB_ID);
@@ -300,22 +298,6 @@ cm_populate_connect_ies(struct roam_offload_synch_ind *roam_synch_data,
 			     connect_ies->bcn_probe_rsp.len);
 	}
 
-	/* Beacon/Probe Rsp frame */
-	if (roam_synch_data->link_beacon_probe_resp_length) {
-		connect_ies->link_bcn_probe_rsp.len =
-			roam_synch_data->link_beacon_probe_resp_length;
-		bcn_probe_rsp_ptr = (uint8_t *)roam_synch_data +
-				roam_synch_data->link_beacon_probe_resp_offset;
-
-		connect_ies->link_bcn_probe_rsp.ptr =
-			qdf_mem_malloc(connect_ies->link_bcn_probe_rsp.len);
-		if (!connect_ies->link_bcn_probe_rsp.ptr)
-			return QDF_STATUS_E_NOMEM;
-		qdf_mem_copy(connect_ies->link_bcn_probe_rsp.ptr,
-			     bcn_probe_rsp_ptr,
-			     connect_ies->link_bcn_probe_rsp.len);
-	}
-
 	/* ReAssoc Rsp IE data */
 	if (roam_synch_data->reassocRespLength >
 	    sizeof(struct wlan_frame_hdr)) {
@@ -467,43 +449,6 @@ cm_fill_bssid_freq_info(uint8_t vdev_id,
 }
 #endif
 
-static void
-cm_update_assoc_btm_cap(struct wlan_objmgr_vdev *vdev,
-			struct cm_vdev_join_rsp *rsp)
-{
-	struct wlan_connect_rsp_ies *connect_ies;
-	const uint8_t *ext_cap_ie;
-	struct s_ext_cap *extcap;
-	uint8_t offset;
-
-	connect_ies = &rsp->connect_rsp.connect_ies;
-	/*
-	 * Retain the btm cap from initial assoc if
-	 * there is no assoc request
-	 */
-	if (!connect_ies->assoc_req.ptr ||
-	    !connect_ies->assoc_req.len)
-		return;
-
-	if (rsp->connect_rsp.is_assoc)
-		offset = WLAN_ASSOC_REQ_IES_OFFSET;
-	else
-		offset = WLAN_REASSOC_REQ_IES_OFFSET;
-
-	ext_cap_ie =
-		wlan_get_ie_ptr_from_eid(WLAN_ELEMID_XCAPS,
-					 connect_ies->assoc_req.ptr + offset,
-					 connect_ies->assoc_req.len - offset);
-
-	if (!ext_cap_ie) {
-		mlme_debug("Ext cap is not present, disable btm");
-		wlan_cm_set_assoc_btm_cap(vdev, false);
-		return;
-	}
-	extcap = (struct s_ext_cap *)&ext_cap_ie[2];
-	wlan_cm_set_assoc_btm_cap(vdev, extcap->bss_transition);
-}
-
 static QDF_STATUS
 cm_fill_roam_info(struct wlan_objmgr_vdev *vdev,
 		  struct roam_offload_synch_ind *roam_synch_data,
@@ -588,7 +533,6 @@ cm_fill_roam_info(struct wlan_objmgr_vdev *vdev,
 	roaming_info->next_erp_seq_num = roam_synch_data->next_erp_seq_num;
 
 	cm_fils_update_erp_seq_num(vdev, roaming_info->next_erp_seq_num, cm_id);
-	cm_update_assoc_btm_cap(vdev, rsp);
 
 	return status;
 }
@@ -658,8 +602,7 @@ static QDF_STATUS cm_process_roam_keys(struct wlan_objmgr_vdev *vdev,
 
 	if (roaming_info->auth_status == ROAM_AUTH_STATUS_AUTHENTICATED ||
 	    QDF_HAS_PARAM(akm, WLAN_CRYPTO_KEY_MGMT_SAE) ||
-	    QDF_HAS_PARAM(akm, WLAN_CRYPTO_KEY_MGMT_OWE) ||
-	    QDF_HAS_PARAM(akm, WLAN_CRYPTO_KEY_MGMT_SAE_EXT_KEY)) {
+	    QDF_HAS_PARAM(akm, WLAN_CRYPTO_KEY_MGMT_OWE)) {
 		struct wlan_crypto_pmksa *pmkid_cache, *pmksa;
 
 		cm_csr_set_ss_none(vdev_id);
@@ -849,49 +792,21 @@ end:
 static void
 cm_update_scan_db_on_roam_success(struct wlan_objmgr_vdev *vdev,
 				  struct wlan_cm_connect_resp *resp,
-				  struct roam_offload_synch_ind *roam_synch_ind,
+				  struct roam_offload_synch_ind *roam_synch_data,
 				  wlan_cm_id cm_id)
 {
 	struct cnx_mgr *cm_ctx;
-	qdf_freq_t link_freq;
-	struct wlan_connect_rsp_ies *ies = &resp->connect_ies;
 
 	cm_ctx = cm_get_cm_ctx(vdev);
 	if (!cm_ctx)
 		return;
 
-	link_freq = mlo_roam_get_chan_freq(wlan_vdev_get_id(vdev),
-					   roam_synch_ind);
-	if (roam_synch_ind->auth_status == ROAM_AUTH_STATUS_CONNECTED) {
-		if (ies->link_bcn_probe_rsp.len)
-			cm_inform_bcn_probe(cm_ctx,
-					    ies->link_bcn_probe_rsp.ptr,
-					    ies->link_bcn_probe_rsp.len,
-					    link_freq,
-					    roam_synch_ind->rssi,
-					    cm_id);
-		cm_inform_bcn_probe(cm_ctx,
-				    ies->bcn_probe_rsp.ptr,
-				    ies->bcn_probe_rsp.len,
-				    resp->freq,
-				    roam_synch_ind->rssi,
-				    cm_id);
-	} else if (wlan_vdev_mlme_is_mlo_link_vdev(vdev)) {
-		if (ies->link_bcn_probe_rsp.len)
-			cm_inform_bcn_probe(cm_ctx,
-					    ies->link_bcn_probe_rsp.ptr,
-					    ies->link_bcn_probe_rsp.len,
-					    link_freq,
-					    roam_synch_ind->rssi,
-					    cm_id);
-	} else {
-		cm_inform_bcn_probe(cm_ctx,
-				    ies->bcn_probe_rsp.ptr,
-				    ies->bcn_probe_rsp.len,
-				    resp->freq,
-				    roam_synch_ind->rssi,
-				    cm_id);
-	}
+	cm_inform_bcn_probe(cm_ctx,
+			    resp->connect_ies.bcn_probe_rsp.ptr,
+			    resp->connect_ies.bcn_probe_rsp.len,
+			    resp->freq,
+			    roam_synch_data->rssi,
+			    cm_id);
 
 	cm_update_scan_mlme_on_roam(vdev, &resp->bssid,
 				    SCAN_ENTRY_CON_STATE_ASSOC);
@@ -979,6 +894,8 @@ cm_fw_roam_sync_propagation(struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
 	 * Send only for legacy STA/MLO STA vdev.
 	 */
 	if (!wlan_vdev_mlme_is_mlo_link_vdev(vdev)) {
+		cm_if_mgr_inform_connect_complete(cm_ctx->vdev,
+						  connect_rsp->connect_status);
 		cm_inform_dlm_connect_complete(cm_ctx->vdev, connect_rsp);
 		wlan_tdls_notify_sta_connect(vdev_id,
 					mlme_get_tdls_chan_switch_prohibited(vdev),
@@ -1388,11 +1305,6 @@ QDF_STATUS wlan_cm_free_roam_synch_frame_ind(struct rso_config *rso_cfg)
 		qdf_mem_free(frame_ind->bcn_probe_rsp);
 		frame_ind->bcn_probe_rsp_len = 0;
 		frame_ind->bcn_probe_rsp = NULL;
-	}
-	if (frame_ind->link_bcn_probe_rsp) {
-		qdf_mem_free(frame_ind->link_bcn_probe_rsp);
-		frame_ind->link_bcn_probe_rsp_len = 0;
-		frame_ind->link_bcn_probe_rsp = NULL;
 	}
 	if (frame_ind->reassoc_req) {
 		qdf_mem_free(frame_ind->reassoc_req);

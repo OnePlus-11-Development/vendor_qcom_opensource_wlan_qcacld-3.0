@@ -296,8 +296,7 @@ cm_handle_auth_offload(struct auth_offload_event *auth_event)
 				auth_event->vdev_id,
 				auth_event->ta);
 	status = wma->csr_roam_auth_event_handle_cb(mac_ctx, auth_event->vdev_id,
-						    auth_event->ap_bssid,
-						    auth_event->akm);
+						    auth_event->ap_bssid);
 	if (QDF_IS_STATUS_ERROR(status)) {
 		wma_err_rl("Trigger pre-auth failed");
 		return QDF_STATUS_E_FAILURE;
@@ -561,17 +560,11 @@ wma_roam_update_vdev(tp_wma_handle wma,
 
 	vdev_id = roamed_vdev_id;
 	wma->interfaces[vdev_id].nss = roam_synch_ind_ptr->nss;
-
-	/* update channel width */
+	/* update freq and channel width */
+	wma->interfaces[vdev_id].ch_freq =
+		roam_synch_ind_ptr->chan_freq;
 	wma->interfaces[vdev_id].chan_width =
 		roam_synch_ind_ptr->chan_width;
-	/* Fill link freq from roam_synch_ind */
-	if (is_multi_link_roam(roam_synch_ind_ptr))
-		wma->interfaces[vdev_id].ch_freq =
-			mlo_roam_get_chan_freq(vdev_id, roam_synch_ind_ptr);
-	else
-		wma->interfaces[vdev_id].ch_freq =
-			roam_synch_ind_ptr->chan_freq;
 
 	del_sta_params = qdf_mem_malloc(sizeof(*del_sta_params));
 	if (!del_sta_params) {
@@ -1526,7 +1519,7 @@ int wma_extscan_hotlist_match_event_handler(void *handle,
 		return -ENOMEM;
 
 	dest_ap = &dest_hotlist->ap[0];
-	dest_hotlist->numOfAps = numap;
+	dest_hotlist->numOfAps = event->total_entries;
 	dest_hotlist->requestId = event->config_request_id;
 
 	if (event->first_entry_index +
