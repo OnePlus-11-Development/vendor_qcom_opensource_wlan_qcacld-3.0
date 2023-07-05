@@ -162,15 +162,6 @@ struct hdd_drv_cmd {
 #define WLAN_HDD_MAX_TCP_PORT            65535
 #endif
 
-extern bool check_private_miracast_cmd(uint8_t *sub_command, int *sta_quota);
-extern int handle_private_miracast_cmd(struct hdd_adapter *adapter, int sta_quota);
-extern int drv_cmd_smartmcc_get_fw_update_quota(struct hdd_adapter *adapter,
-			    struct hdd_context *hdd_ctx,
-			    uint8_t *command,
-			    uint8_t command_len,
-			    struct hdd_priv_data *priv_data);
-// OPLUS_FEATURE_WIFI_CAPCENTER_SMARTMCC end
-
 /**
  * drv_cmd_validate() - Validates for space in hdd driver command
  * @command: pointer to input data (its a NULL terminated string)
@@ -4542,11 +4533,6 @@ static int drv_cmd_miracast(struct hdd_adapter *adapter,
 
 	value = command + 9;
 
-//	if (check_private_miracast_cmd(value, &sta_quota)) {
-//	    return handle_private_miracast_cmd(adapter, sta_quota);
-//	}
-	// OPLUS_FEATURE_WIFI_CAPCENTER_SMARTMCC end
-
 	/* Convert the value from ascii to integer */
 	ret = kstrtou8(value, 10, &filter_type);
 	if (ret < 0) {
@@ -6871,33 +6857,6 @@ static int drv_cmd_get_function_call_map(struct hdd_adapter *adapter,
 }
 #endif
 
-//ifdef OPLUS_FEATURE_WIFI_ARCHITECHURE
-static int drv_cmd_set_11be_disabled(struct hdd_adapter *adapter,
-					 struct hdd_context *hdd_ctx,
-					 uint8_t *command,
-					 uint8_t command_len,
-					 struct hdd_priv_data *priv_data){
-	int errno;
-	uint8_t val = 0;
-	uint8_t *value = command;
-	value = value + 18; //command：SET-11BE-DISABLED 1
-	errno = kstrtou8(value, 10, &val);
-	if (errno < 0) {
-		/*
-		 * If the input value is greater than max value of datatype,
-		 * then also kstrtou8 fails
-		 */
-		hdd_err("kstrtou8 failed invalid input value");
-		return -EINVAL;
-	}
-	hdd_debug("command val %d,errno %d", val, errno);
-	if(val){
-		hdd_ctx->psoc->soc_nif.user_config.usr_disable_eht = true;
-	}
-	return 0;
-}
-//endif
-
 /*
  * The following table contains all supported WLAN HDD
  * IOCTL driver commands and the handler for each of them.
@@ -7014,10 +6973,6 @@ static const struct hdd_drv_cmd hdd_drv_cmds[] = {
 	{"RXFILTER-STOP",             drv_cmd_dummy, false},
 	{"BTCOEXSCAN-START",          drv_cmd_dummy, false},
 	{"BTCOEXSCAN-STOP",           drv_cmd_dummy, false},
-	{"GET-FW-UPDATE-MCC-QUOTA",   drv_cmd_smartmcc_get_fw_update_quota, false},
-	// End
-	{"SET-11BE-DISABLED",   drv_cmd_set_11be_disabled, true},
-	// End
 };
 
 /**
